@@ -2,17 +2,20 @@
 # -*- coding: utf-8 -*-
 
 from argparse import ArgumentParser
-from json import load
-from errno import ENOENT, EINVAL
-from re import compile as regex
-from sch import *
+from json     import load
+from errno    import ENOENT, EINVAL
+from re       import compile as regex
+from sch      import Schematic
+from logging  import getLogger, StreamHandler
+from logging  import ERROR, WARNING, INFO, DEBUG, NOTSET
 
 def parse_arguments():
     parser = ArgumentParser(description='Tool to assign MPNs to symbols in a KiCAD schematic')
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument("-v",  "--verbose",     action = "store_true",        help = 'doesn\'t do anything ATM')
-    parser.add_argument('-s', "--schematic",   type = str, required=True,    help='path to .sch file')
-    parser.add_argument('-l', "--lookuptable", type = str, required=True,    help='path to mpn lookup table')
+    mutexg = parser.add_mutually_exclusive_group()
+    mutexg.add_argument("-q", "--quiet",       action = "store_true",     help = 'Turn off warnings')
+    mutexg.add_argument("-v", "--verbose",     action = "count",          help = 'Set loglevel')
+    parser.add_argument('-s', "--schematic",   type = str, required=True, help = 'path to .sch file')
+    parser.add_argument('-l', "--lookuptable", type = str, required=True, help = 'path to mpn lookup table')
     args = parser.parse_args()
     return args
 
@@ -20,24 +23,39 @@ def read_schematic(path):
     try:
         return Schematic(path)
     except FileNotFoundError as fnfe:
-        print(fnfe)
-        print("Could not find schematic file")
+        error(fnfe)
+        error("Could not find schematic file")
         exit(ENOENT)
 
 def read_lut(path):
     try:
         return load(open(path, 'r'))
     except FileNotFoundError as fnfe:
-        print(fnfe)
-        print("Could not find lookup table file")
+        log.error(fnfe)
+        log.error("Could not find lookup table file")
         exit(ENOENT)
     except json.decoder.JSONDecodeError as jsone:
-        print(jsone)
-        print("Could not read lookup table file")
+        log.error(jsone)
+        log.error("Could not read lookup table file")
         exit(EINVAL)
+
+def generate_logger(verbose, quiet):
+    logger = getLogger()
+    logger.addHandler(StreamHandler())
+    if verbose:
+        if   1 == verbose:
+            logger.setLevel(INFO)
+            logger.info("Verbose output.")
+        elif 2 <= verbose:
+            logger.setLevel(DEBUG)
+            logger.debug("Debug output.")
+    elif quiet:
+        logger.setLevel(ERROR)
+    return logger
 
 def main():
     args     = parse_arguments()
+    log      = generate_logger(args.verbose, args.quiet)
     sch      = read_schematic(args.schematic)
     part_lut = read_lut(args.lookuptable)
     cat_expr = regex('[a-zA-Z]+')
@@ -52,7 +70,7 @@ def main():
         datasheet_field = component.fields[3]
         mpn_field = None
 
-        # Buildtuple of identifying properties
+        # build tuple of identifying properties
         sch_tuple = {
             "Value"     : component.fields[1]["ref"].replace('"', ''),
             "Footprint" : component.fields[2]["ref"].replace('"', ''),
@@ -68,10 +86,12 @@ def main():
         if not mpn_field:
             mpn_field = component.addField({'name': '"MPN"', 'ref': '""'})
 
-        # Try to match tuple
+        # try to match tuple
         if category in part_lut:
             found = False
+
             for part in part_lut[category]:
+                # generate reduced dict for matching
                 part_tuple = part.copy()
                 try:
                     part_tuple.pop("MPN") 
@@ -79,16 +99,18 @@ def main():
                 except KeyError as ke:
                     print("{} missing for {}: {}".format(ke, category, part))
                     pass
-                # In case of match, assign MPN and Datasheet
+                # in case of match, assign MPN and Datasheet and iterate for next part
                 if(part_tuple == sch_tuple):
-                    found = True
+                    log.info("Matched {} with {}".format(Reference, part))
                     mpn_field["ref"] = "\"{}\"".format(part["MPN"])
                     datasheet_field["ref"] = "\"{}\"".format(part["Datasheet"])
+                    found = True
                     break
+
             if not found:
-                print("No part found for {}: {}".format(Reference, sch_tuple))
+                log.warning("No part found for {}: {}".format(Reference, sch_tuple))
         else:
-            print("Category {} not found".format(category))
+            log.warning("Category {} not found".format(category))
     sch.save()
 
 if __name__ == "__main__":
