@@ -9,11 +9,13 @@ from sch      import Schematic
 from logging  import getLogger, StreamHandler
 from logging  import ERROR, WARNING, INFO, DEBUG, NOTSET
 
+cat_expr = regex('[a-zA-Z]+')
+
 def parse_arguments():
     parser = ArgumentParser(description='Tool to assign MPNs to symbols in a KiCAD schematic')
     mutexg = parser.add_mutually_exclusive_group()
     mutexg.add_argument("-q", "--quiet",       action = "store_true",     help = 'Turn off warnings')
-    mutexg.add_argument("-v", "--verbose",     action = "count",          help = 'Set loglevel')
+    mutexg.add_argument("-v",                  action = "count",          help = 'Set loglevel')
     parser.add_argument('-s', "--schematic",   type = str, required=True, help = 'path to .sch file')
     parser.add_argument('-l', "--lookuptable", type = str, required=True, help = 'path to mpn lookup table')
     args = parser.parse_args()
@@ -53,64 +55,75 @@ def generate_logger(verbose, quiet):
         logger.setLevel(ERROR)
     return logger
 
+def gen_comp_tuple(component):
+    comp_tuple = {
+        "Value"     : component.fields[1]["ref"].replace('"', ''),
+        "Footprint" : component.fields[2]["ref"].replace('"', ''),
+    }
+    for field in component.fields[4:]:
+        key   = field["name"].replace('"', '')
+        value = field["ref"].replace('"', '')
+        if key != "MPN":
+            comp_tuple.update({key : value})
+    return comp_tuple
+
+def gen_part_tuple(part):
+    part_tuple = part.copy()
+    try:
+        part_tuple.pop("MPN") 
+        part_tuple.pop("Datasheet")
+    except KeyError as ke:
+        log.error("{} missing for {}: {}".format(ke, category, part))
+    return part_tuple
+
+def component_assert_mpn_field(component):
+    mpn_field = None
+    for field in component.fields[4:]:
+        if "MPN" == field["name"].replace('"', ''):
+            mpn_field = field
+    if not mpn_field:
+        mpn_field = component.addField({'name': '"MPN"', 'ref': '""'})
+    return mpn_field
+
+def match_component(component, part_lut):
+    # ignore these 
+    if '#PWR' in component.fields[0]['ref'] or\
+       'PWR_FLAG' in component.fields[1]['ref']:
+        return
+
+    Reference  = component.fields[0]["ref"].replace('"', '')
+    category   = cat_expr.match(Reference).group()
+    datasheet_field = component.fields[3]
+    mpn_field  = component_assert_mpn_field(component)
+    comp_tuple = gen_comp_tuple(component)
+
+    if category in part_lut:
+        found = False
+        for part in part_lut[category]:
+            # generate reduced dict for matching
+            part_tuple = gen_part_tuple(part)
+            # in case of match, assign MPN and Datasheet and iterate for next part
+            if part_tuple == comp_tuple:
+                log.info("Matched {} with {}".format(Reference, part))
+                mpn_field["ref"] = "\"{}\"".format(part["MPN"])
+                datasheet_field["ref"] = "\"{}\"".format(part["Datasheet"])
+                found = True
+                break
+        if not found:
+            log.warning("No part found for {}: {}".format(Reference, comp_tuple))
+    else:
+        log.warning("Category {} not found".format(category))
+
 def main():
+    global log
     args     = parse_arguments()
-    log      = generate_logger(args.verbose, args.quiet)
+    log      = generate_logger(args.v, args.quiet)
     sch      = read_schematic(args.schematic)
     part_lut = read_lut(args.lookuptable)
-    cat_expr = regex('[a-zA-Z]+')
 
     for component in sch.components:
-        if '#PWR' in component.fields[0]['ref'] or\
-           'PWR_FLAG' in component.fields[1]['ref']:
-            continue
+        match_component(component, part_lut)
 
-        Reference = component.fields[0]["ref"].replace('"', '')
-        category  = cat_expr.match(Reference).group()
-        datasheet_field = component.fields[3]
-        mpn_field = None
-
-        # build tuple of identifying properties
-        sch_tuple = {
-            "Value"     : component.fields[1]["ref"].replace('"', ''),
-            "Footprint" : component.fields[2]["ref"].replace('"', ''),
-        }
-        for field in component.fields[4:]:
-            key   = field["name"].replace('"', '')
-            value = field["ref"].replace('"', '')
-            if key != "MPN":
-                sch_tuple.update({key : value})
-            else:
-                mpn_field = field
-
-        if not mpn_field:
-            mpn_field = component.addField({'name': '"MPN"', 'ref': '""'})
-
-        # try to match tuple
-        if category in part_lut:
-            found = False
-
-            for part in part_lut[category]:
-                # generate reduced dict for matching
-                part_tuple = part.copy()
-                try:
-                    part_tuple.pop("MPN") 
-                    part_tuple.pop("Datasheet")
-                except KeyError as ke:
-                    print("{} missing for {}: {}".format(ke, category, part))
-                    pass
-                # in case of match, assign MPN and Datasheet and iterate for next part
-                if(part_tuple == sch_tuple):
-                    log.info("Matched {} with {}".format(Reference, part))
-                    mpn_field["ref"] = "\"{}\"".format(part["MPN"])
-                    datasheet_field["ref"] = "\"{}\"".format(part["Datasheet"])
-                    found = True
-                    break
-
-            if not found:
-                log.warning("No part found for {}: {}".format(Reference, sch_tuple))
-        else:
-            log.warning("Category {} not found".format(category))
     sch.save()
 
 if __name__ == "__main__":
