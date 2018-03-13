@@ -31,7 +31,44 @@ KiCad utilities
 
 **update_footprints.py**: This script updates the footprints fields of sch files using a csv as input.
 
-**assign_mpns.py**: This script updates the MPN and Datasheet fields of sch files using a json as input.
+**assign_mpns.py**: This script updates the MPN and Datasheet fields of sch files using a json lookup table as input.
+The json file may look like this
+```json
+{
+    "C": [
+        {
+            "Value"             : "100n",
+            "Footprint"         : "Capacitors_SMD:C_0402",
+            "Tolerance"         : "5%",
+            "MPN"               : "12345",
+            "Datasheet"         : "https://www.url.tld/12345.pdf"
+        },
+        {
+            "Value"             : "1u",
+            "Footprint"         : "Resistors_SMD:R_0402",
+            "Tolerance"         : "10%",
+            "MPN"               : "abcde",
+            "Datasheet"         : "https://www.url.tld/abcde.pdf"
+        }
+    ],
+    "R": [
+        {
+            "Value"             : "100",
+            "Footprint"         : "Capacitors_SMD:C_0402",
+            "Tolerance"         : "5%",
+            "MPN"               : "67890",
+            "Datasheet"         : "https://www.url.tld/67890.pdf"
+        },
+        {
+            "Value"             : "1k",
+            "Footprint"         : "Resistors_SMD:R_0402",
+            "Tolerance"         : "10%",
+            "MPN"               : "fghij",
+            "Datasheet"         : "https://www.url.tld/fghij.pdf"
+        }
+    ]
+}
+```
 
 ## pcb directory
 
@@ -77,7 +114,21 @@ How to use
     # run the following command to see other options
     ./add_part_number.py -h
 
+## Assigning Manufacturer Part Numbers (MPNs) and Datasheet Links
 
+    # first get into sch directory
+    cd sch
+    
+    # use the following command to add the MPN and Datasheet field using the passed json lookup table file
+    # the lookup table is a dict of lists of dicts
+    # the key for each list is the acronym for the part category
+    # e.g. "R" for resistors, "C" for capacitors, "IC" for integrated circuits
+    # the behaviour is search for a complete matching ditch is the correct list for each part
+    ./assign_mpns.py -s path_to_sch_file -l path_to_json_lut
+    
+    # run the following command to see the help
+    ./assign_mpns.py -h
+    
 ## Footprint Checker
 
     # first get into pcb directory
