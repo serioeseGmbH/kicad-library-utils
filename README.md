@@ -31,6 +31,8 @@ KiCad utilities
 
 **update_footprints.py**: This script updates the footprints fields of sch files using a csv as input.
 
+**assign_mpns.py**: This script updates the MPN and Datasheet fields of sch files using a json as input.
+
 ## pcb directory
 
 **kicad_mod.py**: A python class to handle KiCad footprint files, as know as kicad_mod.
